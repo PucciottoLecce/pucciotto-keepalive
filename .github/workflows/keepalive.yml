@@ -1,0 +1,64 @@
+name: keepalive
+
+# Sveglia/mantiene caldi i servizi Render Free durante la fascia operativa.
+# Il segreto e' il --max-time lungo: tiene aperta la connessione oltre il
+# cold start di Render (~50s), cosa che il timeout da 30s di cron-job.org
+# non riusciva a coprire.
+#
+# NB: GitHub Actions usa SEMPRE UTC e NON gestisce l'ora legale.
+# Fascia operativa di Order: ~09:00-00:59 Europe/Rome.
+#   - Estate (CEST = UTC+2): 09:00-00:59 local = 07:00-22:59 UTC
+#   - Inverno (CET  = UTC+1): 09:00-00:59 local = 08:00-23:59 UTC
+# Usiamo 07:00-23:59 UTC (7-23): copre TUTTA la fascia in entrambe le
+# stagioni, con al massimo ~1h di margine ai bordi. Order resta comunque
+# spento nelle ore centrali della notte (00:00-07:00 UTC), cosi' non
+# sforiamo le 750 ore/mese condivise di Render Free.
+#
+# I cron di GitHub Actions possono ritardare di qualche minuto o saltare un
+# giro sotto carico: non e' un problema, il giro successivo si auto-guarisce.
+
+on:
+  schedule:
+    - cron: '*/5 7-23 * * *'
+  workflow_dispatch: {}   # avvio manuale dal bottone "Run workflow"
+
+# Evita che due run schedulati si accavallino se uno e' lento.
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Sveglia OrderPucciotto (attende il cold start ~50s)
+        run: |
+          echo "Ping Order: $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
+          curl -fsS -o /dev/null -w 'HTTP %{http_code} in %{time_total}s\n' \
+            --connect-timeout 30 \
+            --max-time 150 \
+            --retry 3 \
+            --retry-all-errors \
+            --retry-delay 20 \
+            https://orderpucciotto.onrender.com/ping \
+            || echo "Ping Order fallito (ignorato per non generare rumore)"
+
+      # --- Quiz: opzionale, oggi gestito da cron-job.org (12:00 + 12:05). ---
+      # Per spostare ANCHE Quiz qui e dismettere cron-job.org: togliere il
+      # commento dallo step qui sotto e aggiungere un cron dedicato a
+      # mezzogiorno (es. '0 10 * * *' UTC = 12:00 CEST). Serve solo a non far
+      # addormentare Supabase (pausa dopo 7 giorni), non ha bisogno di girare
+      # spesso.
+      #
+      # - name: Keep-alive DB Quiz (query reale su Supabase)
+      #   run: |
+      #     echo "Ping Quiz: $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
+      #     curl -fsS -o /dev/null -w 'HTTP %{http_code} in %{time_total}s\n' \
+      #       --connect-timeout 30 \
+      #       --max-time 150 \
+      #       --retry 3 \
+      #       --retry-all-errors \
+      #       --retry-delay 20 \
+      #       https://puccioquiz-service.onrender.com/keep-db-alive \
+      #       || echo "Ping Quiz fallito (ignorato)"
