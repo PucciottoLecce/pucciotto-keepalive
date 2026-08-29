@@ -1,4 +1,5 @@
 name: keepalive
+# Keepalive per servizi Render Free (vedi README).
 
 # Sveglia/mantiene caldi i servizi Render Free durante la fascia operativa.
 # Il segreto e' il --max-time lungo: tiene aperta la connessione oltre il
