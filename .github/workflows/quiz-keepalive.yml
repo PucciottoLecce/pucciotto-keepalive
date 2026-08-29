@@ -3,15 +3,16 @@ name: quiz-keepalive
 # Tiene sveglio il DB Supabase di PuccioQuiz.
 #
 # Supabase Free mette in PAUSA il progetto dopo ~7 giorni di inattivita'.
-# L'endpoint /keep-db-alive fa una query reale su Supabase (tabella
-# quiz_entries), quindi basta UNA chiamata andata a buon fine ogni tanto
-# (anche una ogni pochi giorni) per azzerare il timer dei 7 giorni.
+# L'endpoint /keep-db-alive fa una query REALE su Supabase
+# (server/index.js -> store.pingDb() -> supabase.from("quiz_entries")
+#  .select("id").limit(1)), quindi basta UNA chiamata andata a buon fine
+# ogni tanto per azzerare il timer dei 7 giorni.
 #
-# Perche' non bastava cron-job.org: il servizio Quiz e' su Render Free e si
-# addormenta; /keep-db-alive deve prima far ripartire Render (cold start
-# ~50s) e POI eseguire la query. Il timeout da 30s di cron-job.org staccava
-# prima => la query non arrivava mai a Supabase. Qui il curl aspetta fino a
-# 180s, quindi la query va a buon fine.
+# Perche' non bastava cron-job.org: /keep-db-alive deve prima far ripartire
+# il servizio Render addormentato (cold start ~50s) e POI fare la query.
+# Con un solo job cron-job.org (timeout 30s) partiva solo la "sveglia"
+# (spesso 503) e la query non arrivava mai. Qui il curl aspetta fino a 180s,
+# quindi la stessa chiamata sveglia il servizio E fa la query.
 #
 # Orario: 1 volta al giorno alle 10:00 UTC = ~12:00 Europe/Rome (11:00 in
 # inverno). La precisione non conta: serve solo che ogni tanto vada a segno.
@@ -25,11 +26,24 @@ jobs:
   ping-quiz:
     runs-on: ubuntu-latest
     steps:
-      - name: Keep-alive Supabase (via Quiz /keep-db-alive)
+      - name: Keep-alive Supabase (via Quiz /keep-db-alive) + verifica
         run: |
           echo "Ping Quiz: $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
-          curl -fsS -o /dev/null -w 'HTTP %{http_code} in %{time_total}s\n' \
+          # Cattura corpo della risposta + codice/tempo in coda.
+          resp=$(curl -fsS \
             --connect-timeout 30 --max-time 180 \
             --retry 4 --retry-all-errors --retry-delay 20 \
-            https://puccioquiz-service.onrender.com/keep-db-alive \
-            || echo "Ping Quiz fallito (ignorato)"
+            -w $'\nHTTP %{http_code} in %{time_total}s' \
+            https://puccioquiz-service.onrender.com/keep-db-alive) \
+            || { echo "Ping Quiz fallito (ignorato). Supabase NON toccato stavolta."; exit 0; }
+          echo "Risposta: $resp"
+          # Conferma che la query su Supabase sia avvenuta davvero.
+          if printf '%s' "$resp" | grep -q '"db":"alive"' \
+             && printf '%s' "$resp" | grep -q '"mode":"supabase"'; then
+            echo "OK: Supabase interrogato davvero (mode=supabase, db=alive). Timer 7 giorni azzerato."
+          elif printf '%s' "$resp" | grep -q '"mode":"memory"'; then
+            echo "ATTENZIONE: servizio in mode=memory => Supabase NON configurato su Render."
+            echo "Il keep-alive non serve a niente finche' mancano SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY."
+          else
+            echo "Nota: risposta inattesa (vedi sopra). HTTP 200 ricevuto ma controlla mode/db."
+          fi
