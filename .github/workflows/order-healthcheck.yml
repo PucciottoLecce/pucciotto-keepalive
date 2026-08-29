@@ -1,0 +1,44 @@
+name: order-healthcheck
+
+# Controlla che Order sia raggiungibile e, se NON risponde in orario di
+# apertura, fa fallire il job => GitHub manda l'email di avviso.
+#
+# Diverso da "keepalive": quello pinga ogni 5 min per tenerlo caldo (e resta
+# silenzioso sui singoli errori, per non fare spam). Questo invece controlla
+# UNA VOLTA L'ORA e serve solo ad avvisarti se Order e' davvero giu'.
+#
+# Gira solo nella fascia 09:00-00:59 Europe/Rome (di notte Order puo'
+# dormire, quindi non ha senso controllarlo ne' svegliarlo). Il curl aspetta
+# fino a 150s: se Order dorme lo sveglia e risponde 200 (nessun allarme);
+# se non risponde nemmeno cosi', e' un problema vero => email.
+
+on:
+  schedule:
+    - cron: '30 7-23 * * *'   # una volta l'ora; il gate limita a 09:00-00:59 Rome
+  workflow_dispatch:
+
+jobs:
+  check-order:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verifica Order (solo 09:00-00:59 Europe/Rome)
+        run: |
+          H=$(TZ='Europe/Rome' date +%H)
+          NOW=$(TZ='Europe/Rome' date '+%Y-%m-%d %H:%M')
+          # Fuori fascia (01:00-08:59) non controllo: Order puo' dormire.
+          # Sui run manuali controllo sempre, per poter testare.
+          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] \
+             && ! { [ "$((10#$H))" -ge 9 ] || [ "$((10#$H))" -eq 0 ]; }; then
+            echo "Fuori fascia ($NOW Rome): Order puo' dormire, nessun controllo."
+            exit 0
+          fi
+          echo "Controllo Order ($NOW Rome)..."
+          if curl -fsS -o /dev/null -w 'HTTP %{http_code} in %{time_total}s\n' \
+               --connect-timeout 30 --max-time 150 \
+               --retry 3 --retry-all-errors --retry-delay 20 \
+               https://orderpucciotto.onrender.com/ping; then
+            echo "OK: Order risponde."
+          else
+            echo "::error::Order NON risponde dopo i tentativi, in orario di apertura. Controlla il servizio su Render (https://orderpucciotto.onrender.com)."
+            exit 1
+          fi
