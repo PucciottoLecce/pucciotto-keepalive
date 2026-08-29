@@ -30,20 +30,24 @@ jobs:
         run: |
           echo "Ping Quiz: $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
           # Cattura corpo della risposta + codice/tempo in coda.
-          resp=$(curl -fsS \
+          # Se dopo tutti i retry non riesce a svegliare/interrogare il servizio,
+          # il job FALLISCE (rosso) => GitHub manda l'email di fallimento.
+          if ! resp=$(curl -fsS \
             --connect-timeout 30 --max-time 180 \
             --retry 4 --retry-all-errors --retry-delay 20 \
             -w $'\nHTTP %{http_code} in %{time_total}s' \
-            https://puccioquiz-service.onrender.com/keep-db-alive) \
-            || { echo "Ping Quiz fallito (ignorato). Supabase NON toccato stavolta."; exit 0; }
+            https://puccioquiz-service.onrender.com/keep-db-alive); then
+            echo "::error::Quiz keep-alive FALLITO: non sono riuscito a svegliare il servizio / fare la query su Supabase dopo i tentativi."
+            exit 1
+          fi
           echo "Risposta: $resp"
           # Conferma che la query su Supabase sia avvenuta davvero.
           if printf '%s' "$resp" | grep -q '"db":"alive"' \
              && printf '%s' "$resp" | grep -q '"mode":"supabase"'; then
             echo "OK: Supabase interrogato davvero (mode=supabase, db=alive). Timer 7 giorni azzerato."
           elif printf '%s' "$resp" | grep -q '"mode":"memory"'; then
-            echo "ATTENZIONE: servizio in mode=memory => Supabase NON configurato su Render."
-            echo "Il keep-alive non serve a niente finche' mancano SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY."
+            echo "::error::Servizio in mode=memory: Supabase NON configurato su Render (mancano SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY). Il keep-alive non serve a niente."
+            exit 1
           else
-            echo "Nota: risposta inattesa (vedi sopra). HTTP 200 ricevuto ma controlla mode/db."
+            echo "::warning::Risposta inattesa: HTTP 200 ma mode/db non confermati. Controlla il log."
           fi
