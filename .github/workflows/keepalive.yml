@@ -1,10 +1,16 @@
 name: keepalive
 
 # Keepalive per i servizi Render Free (dettagli nel README).
-# Il curl aspetta fino a 150s per superare il cold start (~50s) di Render,
-# cosa che il timeout da 30s di cron-job.org non copriva.
-# GitHub Actions usa UTC: 07:00-23:59 UTC copre la fascia ~09:00-00:59
-# Europe/Rome in estate e in inverno, lasciando Order spento di notte.
+#
+# Order deve stare SVEGLIO dalle 09:00 alle 00:59 (Europe/Rome) e DORMIRE
+# dall'01:00 alle 08:59, per risparmiare le 750 ore/mese condivise di Render.
+#
+# GitHub Actions gira in UTC e NON gestisce l'ora legale, quindi non basta
+# un cron. Trucco: schedulo largo in UTC (07:00-23:59, che copre la fascia
+# sia in estate UTC+2 sia in inverno UTC+1) e poi DENTRO il job controllo
+# l'ora vera di Europe/Rome, pingando solo se siamo nella fascia. Cosi' e'
+# esatto tutto l'anno, ora legale inclusa, senza doverlo mai ritoccare.
+# Il curl aspetta fino a 150s per superare il cold start (~50s) di Render.
 
 on:
   schedule:
@@ -15,14 +21,22 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Sveglia OrderPucciotto
+      - name: Sveglia OrderPucciotto (solo 09:00-00:59 Europe/Rome)
         run: |
-          echo "Ping Order: $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
-          curl -fsS -o /dev/null -w 'HTTP %{http_code} in %{time_total}s\n' \
-            --connect-timeout 30 --max-time 150 \
-            --retry 3 --retry-all-errors --retry-delay 20 \
-            https://orderpucciotto.onrender.com/ping \
-            || echo "Ping Order fallito (ignorato)"
+          H=$(TZ='Europe/Rome' date +%H)
+          NOW=$(TZ='Europe/Rome' date '+%Y-%m-%d %H:%M')
+          # Fascia 09:00-00:59 Rome = ora locale 9..23 OPPURE 0.
+          # Sui run manuali (workflow_dispatch) pingo sempre, per poter testare.
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [ "$((10#$H))" -ge 9 ] || [ "$((10#$H))" -eq 0 ]; then
+            echo "Dentro fascia ($NOW Rome): sveglio Order"
+            curl -fsS -o /dev/null -w 'HTTP %{http_code} in %{time_total}s\n' \
+              --connect-timeout 30 --max-time 150 \
+              --retry 3 --retry-all-errors --retry-delay 20 \
+              https://orderpucciotto.onrender.com/ping \
+              || echo "Ping Order fallito (ignorato)"
+          else
+            echo "Fuori fascia ($NOW Rome): Order deve dormire, nessun ping."
+          fi
 
       # Quiz: opzionale, oggi su cron-job.org. Per attivarlo qui, togliere il
       # commento e aggiungere un cron a mezzogiorno (es. '0 10 * * *' UTC).
