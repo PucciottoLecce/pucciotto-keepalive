@@ -38,11 +38,5 @@ jobs:
             echo "Fuori fascia ($NOW Rome): Order deve dormire, nessun ping."
           fi
 
-      # Quiz: opzionale, oggi su cron-job.org. Per attivarlo qui, togliere il
-      # commento e aggiungere un cron a mezzogiorno (es. '0 10 * * *' UTC).
-      # - name: Keep-alive DB Quiz
-      #   run: |
-      #     curl -fsS -o /dev/null -w 'HTTP %{http_code}\n' \
-      #       --connect-timeout 30 --max-time 150 \
-      #       --retry 3 --retry-all-errors --retry-delay 20 \
-      #       https://puccioquiz-service.onrender.com/keep-db-alive || true
+      # NB: il keep-alive di PuccioQuiz/Supabase e' in un workflow separato:
+      # .github/workflows/quiz-keepalive.yml (1 colpo al giorno a mezzogiorno).

@@ -1,0 +1,35 @@
+name: quiz-keepalive
+
+# Tiene sveglio il DB Supabase di PuccioQuiz.
+#
+# Supabase Free mette in PAUSA il progetto dopo ~7 giorni di inattivita'.
+# L'endpoint /keep-db-alive fa una query reale su Supabase (tabella
+# quiz_entries), quindi basta UNA chiamata andata a buon fine ogni tanto
+# (anche una ogni pochi giorni) per azzerare il timer dei 7 giorni.
+#
+# Perche' non bastava cron-job.org: il servizio Quiz e' su Render Free e si
+# addormenta; /keep-db-alive deve prima far ripartire Render (cold start
+# ~50s) e POI eseguire la query. Il timeout da 30s di cron-job.org staccava
+# prima => la query non arrivava mai a Supabase. Qui il curl aspetta fino a
+# 180s, quindi la query va a buon fine.
+#
+# Orario: 1 volta al giorno alle 10:00 UTC = ~12:00 Europe/Rome (11:00 in
+# inverno). La precisione non conta: serve solo che ogni tanto vada a segno.
+
+on:
+  schedule:
+    - cron: '0 10 * * *'
+  workflow_dispatch:
+
+jobs:
+  ping-quiz:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep-alive Supabase (via Quiz /keep-db-alive)
+        run: |
+          echo "Ping Quiz: $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
+          curl -fsS -o /dev/null -w 'HTTP %{http_code} in %{time_total}s\n' \
+            --connect-timeout 30 --max-time 180 \
+            --retry 4 --retry-all-errors --retry-delay 20 \
+            https://puccioquiz-service.onrender.com/keep-db-alive \
+            || echo "Ping Quiz fallito (ignorato)"
