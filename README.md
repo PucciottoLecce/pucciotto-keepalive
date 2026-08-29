@@ -59,3 +59,5 @@ cron-job.org.
 1. Tab **Actions** → workflow **keepalive** → "Run workflow" per un test manuale.
 2. Nei log lo step di Order deve mostrare `HTTP 200`, anche partendo da servizio
    addormentato (il `--max-time` copre il cold start).
+
+<!-- keepalive attivo -->
