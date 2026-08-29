@@ -21,7 +21,7 @@ name: keepalive
 on:
   schedule:
     - cron: '*/5 7-23 * * *'
-  workflow_dispatch: {}   # avvio manuale dal bottone "Run workflow"
+  workflow_dispatch:       # avvio manuale dal bottone "Run workflow"
 
 # Evita che due run schedulati si accavallino se uno e' lento.
 concurrency:
